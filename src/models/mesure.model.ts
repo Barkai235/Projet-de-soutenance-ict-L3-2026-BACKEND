@@ -128,6 +128,11 @@ const MesureModel = {
   },
 
   async delete(id: number, patient_id: number): Promise<boolean> {
+    // Supprimer l'alerte liée d'abord (FK sans ON DELETE CASCADE)
+    await pool.execute(
+      'DELETE FROM alertes_tension WHERE mesure_id = ? AND patient_id = ?',
+      [id, patient_id]
+    );
     const [result] = await pool.execute<ResultSetHeader>(
       'DELETE FROM mesures_tension WHERE id = ? AND patient_id = ?',
       [id, patient_id]
@@ -136,6 +141,14 @@ const MesureModel = {
   },
 
   async deleteAllByPatient(patient_id: number): Promise<number> {
+    // 1. Supprimer les alertes liées aux mesures du patient (FK sans ON DELETE CASCADE)
+    await pool.execute(
+      `DELETE a FROM alertes_tension a
+       JOIN mesures_tension m ON m.id = a.mesure_id
+       WHERE m.patient_id = ?`,
+      [patient_id]
+    );
+    // 2. Supprimer les mesures
     const [result] = await pool.execute<ResultSetHeader>(
       'DELETE FROM mesures_tension WHERE patient_id = ?',
       [patient_id]
@@ -181,6 +194,23 @@ const MesureModel = {
       [patient_id]
     );
     return rows;
+  },
+
+  /** Vérifie l'existence d'une mesure identique (même patient, tension et date à la seconde près).
+   *  Sert à rendre la synchro mobile idempotente (évite les doublons sur appels parallèles). */
+  async existsIdentique(
+    patient_id: number,
+    systolique: number,
+    diastolique: number,
+    date_mesure?: string
+  ): Promise<boolean> {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM mesures_tension
+       WHERE patient_id = ? AND systolique = ? AND diastolique = ?
+         AND date_mesure = ? LIMIT 1`,
+      [patient_id, systolique, diastolique, date_mesure ?? null]
+    );
+    return rows.length > 0;
   },
 
   // Pour le médecin : voir les mesures de ses patients

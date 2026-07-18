@@ -7,6 +7,16 @@ import { envoyerSMSAuPatient } from './sms.service';
 
 const MesureService = {
 
+  /** Normalise une date (ISO 8601, Date, ou déjà au format MySQL) vers 'YYYY-MM-DD HH:MM:SS'. */
+  normalizeDate(value?: string): string | undefined {
+    if (!value) return undefined;
+    // Déjà au format MySQL
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) return value;
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return undefined;
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  },
+
   async ajouterMesure(data: {
     patient_id:  number;
     prise_par?:  number;
@@ -35,7 +45,7 @@ const MesureService = {
       contexte:    data.contexte,
       statut:      classification.statut,
       note:        data.note,
-      date_mesure: data.date_mesure ?? new Date().toISOString().slice(0, 19).replace('T', ' '),
+      date_mesure: MesureService.normalizeDate(data.date_mesure) ?? new Date().toISOString().slice(0, 19).replace('T', ' '),
       source:      data.source ?? 'manuel',
     };
 
@@ -115,6 +125,17 @@ const MesureService = {
     const out: Awaited<ReturnType<(typeof MesureService)['ajouterMesure']>>[] =
       [];
     for (const m of mesures) {
+      // Idempotence : on ignore une mesure identique déjà enregistrée
+      // (même patient, tension et date à la seconde près). Évite les doublons
+      // quand le mobile renvoie plusieurs fois le même batch hors-ligne.
+      const dejaLa = await MesureModel.existsIdentique(
+        patient_id,
+        m.systolique,
+        m.diastolique,
+        m.date_mesure
+      );
+      if (dejaLa) continue;
+
       out.push(
         await MesureService.ajouterMesure({
           patient_id,
@@ -126,7 +147,7 @@ const MesureService = {
           contexte:    m.contexte,
           note:        m.note,
           date_mesure: m.date_mesure,
-          source:      'offline',
+          source:      'manuel',
         })
       );
     }

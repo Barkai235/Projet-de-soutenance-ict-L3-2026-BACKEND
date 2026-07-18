@@ -83,6 +83,7 @@ const MesureController = {
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur serveur';
+      console.error('[sync mesures] ERREUR:', msg, (err as any)?.sql ?? '');
       sendError(res, msg);
     }
   },
